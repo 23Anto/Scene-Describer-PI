@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 import requests
 import pytesseract
-import pyttsx3
+import audio_feedback as audio
+from video_source import apply_rotation
 import threading
 import time
 
@@ -11,51 +12,12 @@ URL = "http://192.168.4.1/stream"
 
 
 # -----------------------------
-# Text-to-speech setup
+# Text-to-speech (shared, interruptible)
 # -----------------------------
-
-speech_queue = []
-speech_lock = threading.Lock()
-
-
-def speak_worker():
-    engine = pyttsx3.init()
-
-    engine.setProperty("rate", 160)
-    engine.setProperty("volume", 1.0)
-
-    while True:
-
-        text = None
-
-        with speech_lock:
-            if speech_queue:
-                text = speech_queue.pop(0)
-
-        if text:
-            print("Speaking:", text)
-            engine.say(text)
-            engine.runAndWait()
-        else:
-            time.sleep(0.1)
-
-
-def start_speech_thread():
-
-    speech_thread = threading.Thread(
-        target=speak_worker,
-        daemon=True
-    )
-
-    speech_thread.start()
-
-    return speech_thread
-
 
 def speak(text):
 
-    with speech_lock:
-        speech_queue.append(text)
+    audio.speak(text, audio.PRIORITY_NORMAL)
 
 
 # -----------------------------
@@ -66,8 +28,7 @@ def ocr_process(cancel_event):
 
     print("Starting OCR...")
 
-    # Start TTS when OCR starts
-    start_speech_thread()
+    audio.cue("start")
 
     response = None
 
@@ -167,6 +128,8 @@ def ocr_process(cancel_event):
                 if frame is None:
                     continue
 
+                frame = apply_rotation(frame)
+
 
                 # -----------------------------
                 # Display camera
@@ -197,10 +160,10 @@ def ocr_process(cancel_event):
 
 
                     # Only speak if text changed
-                    if text != last_text:
-                    	speak(text)
+                    if text and text != last_text:
+                        speak(text)
 
-                    	last_text = text
+                        last_text = text
 
 
             # Stop if Vosk received "stop"

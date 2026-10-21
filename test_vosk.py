@@ -6,8 +6,17 @@ import numpy as np
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
 
+import audio_feedback as audio
+from test_describe import describe_process
 from test_tesseract import ocr_process
-from test_yolo import yolo_process
+
+
+def yolo_process(cancel_event):
+    # Imported on first use: ultralytics/torch is the biggest RAM cost on the
+    # Pi, so don't pay it until the user actually says "see".
+    from test_yolo import yolo_process as _yolo_process
+    _yolo_process(cancel_event)
+
 
 # --- Configuration ---
 # NOTE: this must be a *local* address to bind to, not the ESP32's address/URL.
@@ -29,7 +38,7 @@ SOCKET_TIMEOUT = 0.1     # seconds
 # RMS level below which we consider a packet "silent" (tune to your mic/gain)
 SILENCE_RMS_THRESHOLD = 50
 
-grammar = '["read", "see", "stop", "[unk]"]'
+grammar = '["read", "see", "describe", "stop", "[unk]"]'
 
 
 # Initialize UDP Socket
@@ -76,6 +85,7 @@ def main():
         print("Please ensure your model folder is unzipped and named 'model' in this directory.")
         return
 
+    audio.cue("listening")
     print("\n>>> System active. Listening for ESP32 audio... (Ctrl+C to stop) <<<\n")
 
     # --- Reception tracking state ---
@@ -118,14 +128,22 @@ def main():
                     
                     print(f"\nFinal Text: {text}")
 
+                    if text in ("read", "see", "describe", "stop"):
+                        # Cut off any speech still playing from the last task
+                        audio.stop()
+
                     if text == "read":
                         dispatch_new_task(ocr_process)
-                    
+
                     if text == "see":
                         dispatch_new_task(yolo_process)
 
+                    if text == "describe":
+                        dispatch_new_task(describe_process)
+
                     if text == "stop":
                         cancel_current_task.set()
+                        audio.cue("stop")
 
                 else:
                     partial_json = json.loads(recognizer.PartialResult())

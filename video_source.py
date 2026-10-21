@@ -17,6 +17,19 @@ import requests
 
 DEFAULT_ESP_URL = "http://192.168.4.1/stream"
 
+# The OV3660 module may be mounted inverted. VIDEO_ROTATE = 0/90/180/270
+# (degrees clockwise) corrects it in software for every consumer.
+_ROTATE_CODES = {
+    90: cv2.ROTATE_90_CLOCKWISE,
+    180: cv2.ROTATE_180,
+    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+}
+
+
+def apply_rotation(frame):
+    code = _ROTATE_CODES.get(int(os.environ.get("VIDEO_ROTATE", "0")))
+    return frame if code is None else cv2.rotate(frame, code)
+
 
 class MJPEGStream:
     """Minimal MJPEG reader with a cv2.VideoCapture-ish interface.
@@ -52,7 +65,7 @@ class MJPEGStream:
                 frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
                 if frame is None:
                     continue
-                return True, frame
+                return True, apply_rotation(frame)
 
             try:
                 chunk = next(self._chunks)

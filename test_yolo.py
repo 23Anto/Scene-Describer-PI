@@ -2,7 +2,7 @@ import os
 import cv2
 import time
 import threading
-import pyttsx3
+import audio_feedback as audio
 
 from ultralytics import YOLO
 from video_source import open_video_source
@@ -14,6 +14,10 @@ from video_source import open_video_source
 
 DIAGNOSTIC_FLOOR = 0.15
 PRODUCTION_THRESHOLD = 0.7
+
+# Cap inference rate so the Pi 4 CPU isn't pinned (it also needs to run
+# Vosk). Raise on faster hardware.
+MAX_FPS = float(os.environ.get("YOLO_MAX_FPS", "3"))
 
 
 # ---------------------------------
@@ -29,28 +33,12 @@ model = YOLO(
 
 
 # ---------------------------------
-# Text-to-speech
+# Text-to-speech (shared, interruptible)
 # ---------------------------------
-
-engine = pyttsx3.init()
-
-engine.setProperty(
-    "rate",
-    160
-)
-
-engine.setProperty(
-    "volume",
-    1.0
-)
-
 
 def speak(text):
 
-    print(f"[YOLO] Speaking: {text}")
-
-    engine.say(text)
-    engine.runAndWait()
+    audio.speak(text, audio.PRIORITY_LOW)
 
 
 # ---------------------------------
@@ -105,6 +93,8 @@ def yolo_process(cancel_event):
                 ok, frame = cap.read()
 
                 if not ok:
+                    # Don't spin the CPU when the stream drops
+                    time.sleep(0.05)
                     continue
 
                 # Always replace the old frame.
@@ -155,6 +145,8 @@ def yolo_process(cancel_event):
             # Check for stop command
             if cancel_event.is_set():
                 break
+
+            loop_started = time.monotonic()
 
             # ---------------------------------
             # Run YOLO on newest frame
@@ -228,6 +220,11 @@ def yolo_process(cancel_event):
 
             # Remember objects from this frame
             previous_objects = current_objects
+
+            # Throttle to MAX_FPS
+            spare = (1.0 / MAX_FPS) - (time.monotonic() - loop_started)
+            if spare > 0:
+                cancel_event.wait(spare)
 
 
         print(
